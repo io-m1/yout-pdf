@@ -1,0 +1,14 @@
+streamlit
+yt-dlp
+youtube-transcript-api
+fpdf
+PyPDF2
+python-docx
+openai
+anthropic
+google-generativeai
+langdetect
+deep-translator
+networkx
+sentence-transformers
+spacy
