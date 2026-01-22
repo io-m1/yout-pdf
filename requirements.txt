@@ -12,3 +12,4 @@ deep-translator
 networkx
 sentence-transformers
 spacy
+pyvis
