@@ -23,11 +23,14 @@ with tab1:
     max_videos = st.text_input("Max videos (channel)")
     uploaded_file = st.file_uploader("PDF/DOC", type=["pdf","docx"])
 
+    if "videos" not in st.session_state:
+        st.session_state.videos = None
+    if "selected_videos" not in st.session_state:
+        st.session_state.selected_videos = []
+
     if st.button("Load"):
         full_text = ""
         report_data = []
-        selected_videos = []
-
         if uploaded_file:
             with st.spinner("Document"):
                 doc_text = ""
@@ -49,94 +52,107 @@ with tab1:
                 videos, error = get_video_urls(url_input.strip(), int(max_videos) if max_videos.isdigit() else None)
                 if error:
                     st.error(error)
-                elif videos:
-                    st.markdown("Select videos")
-                    cols = st.columns(4)
-                    for idx, v in enumerate(videos):
-                        with cols[idx % 4]:
-                            st.image(v['thumbnail'], width=200)
-                            checked = st.checkbox(v['title'][:40] + "..." if len(v['title']) > 40 else v['title'], value=True, key=f"chk_{v['video_id']}")
-                            if checked:
-                                selected_videos.append(v)
+                else:
+                    st.session_state.videos = videos
+                    st.session_state.selected_videos = videos  # default all selected
 
-        if selected_videos or uploaded_file:
-            if st.button("Extract"):
-                start_time = time.time()
-                progress_bar = st.progress(0)
-                status_text = st.empty()
-                eta_text = st.empty()
-                total_time_text = st.empty()
+        st.success("Loaded")
 
-                total = len(selected_videos)
-                times = []
+    if st.session_state.videos:
+        st.markdown("Select videos")
+        cols = st.columns(4)
+        selected_videos = []
+        for idx, v in enumerate(st.session_state.videos):
+            with cols[idx % 4]:
+                st.image(v['thumbnail'], width=200)
+                checked = st.checkbox(v['title'][:40] + "..." if len(v['title']) > 40 else v['title'], 
+                                     value=v in st.session_state.selected_videos, 
+                                     key=f"chk_{v['video_id']}")
+                if checked:
+                    selected_videos.append(v)
+        st.session_state.selected_videos = selected_videos
 
-                for i, v in enumerate(selected_videos):
-                    loop_start = time.time()
-                    status_text.text(f"({i+1}/{total}) {v['title']}")
-                    trans = get_transcript(v['url'])
-                    if trans:
-                        report_data.append({**v, 'transcript': trans})
-                        full_text += f"\n\n--- {v['title']} ---\n{trans}"
-                    progress_bar.progress((i+1) / total)
-                    times.append(time.time() - loop_start)
-                    if times:
-                        avg = sum(times) / len(times)
-                        rem_sec = (total - i - 1) * avg
-                        rem_min = int(rem_sec // 60)
-                        rem_sec = int(rem_sec % 60)
-                        eta_text.text(f"Remaining: {rem_min} min {rem_sec:02d} sec")
+    if st.session_state.selected_videos or uploaded_file:
+        if st.button("Extract"):
+            start_time = time.time()
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            eta_text = st.empty()
+            total_time_text = st.empty()
 
-                total_sec = time.time() - start_time
-                total_min = int(total_sec // 60)
-                total_sec = int(total_sec % 60)
-                total_time_text.text(f"Total: {total_min} min {total_sec:02d} sec")
-                status_text.text("Done")
+            total = len(st.session_state.selected_videos)
+            times = []
 
-                if full_text:
-                    st.session_state.full_text = full_text
-                    st.session_state.report_data = report_data
+            full_text = ""
+            report_data = []
 
-                    buf = io.BytesIO()
-                    pdf = FPDF()
-                    pdf.set_auto_page_break(auto=True, margin=15)
-                    for item in report_data:
-                        pdf.add_page()
-                        pdf.set_font("Helvetica", 'B', 16)
-                        safe_title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
-                        pdf.multi_cell(0, 10, safe_title, align='C')
-                        pdf.ln(5)
-                        pdf.set_font("Helvetica", '', 10)
-                        pdf.cell(0, 8, f"Source: {'YouTube' if 'url' in item else 'Document'}", ln=True)
-                        pdf.ln(10)
-                        pdf.set_font("Helvetica", '', 11)
-                        safe_transcript = item['transcript'].encode('latin-1', 'ignore').decode('latin-1')
-                        pdf.multi_cell(0, 6, safe_transcript)
-                    pdf.output(buf)
-                    buf.seek(0)
-                    st.download_button("Download PDF", buf, "Content.pdf", "application/pdf")
+            for i, v in enumerate(st.session_state.selected_videos):
+                loop_start = time.time()
+                status_text.text(f"({i+1}/{total}) {v['title']}")
+                trans = get_transcript(v['url'])
+                if trans:
+                    report_data.append({**v, 'transcript': trans})
+                    full_text += f"\n\n--- {v['title']} ---\n{trans}"
+                progress_bar.progress((i+1) / total)
+                times.append(time.time() - loop_start)
+                if times:
+                    avg = sum(times) / len(times)
+                    rem_sec = (total - i - 1) * avg
+                    rem_min = int(rem_sec // 60)
+                    rem_sec = int(rem_sec % 60)
+                    eta_text.text(f"Remaining: {rem_min} min {rem_sec:02d} sec")
 
-                    with st.spinner("AlgoDev"):
-                        ranked_terms, G, all_terms, net, extra_msg = simulate_dfil(full_text)
-                        context_mode = st.selectbox("Context", ["Evergreen", "QDF", "Mobile"])
-                        gated_weights = simulate_gating(ranked_terms, G, context_mode, st.session_state.get('serper_key'), url_input or (uploaded_file.name if uploaded_file else ""))
-                        report, csv_data = generate_seo_report(ranked_terms, G, gated_weights, extra_msg)
+            total_sec = time.time() - start_time
+            total_min = int(total_sec // 60)
+            total_sec = int(total_sec % 60)
+            total_time_text.text(f"Total: {total_min} min {total_sec:02d} sec")
+            status_text.text("Done")
 
-                        st.text_area("Report", report, height=400)
+            if full_text:
+                st.session_state.full_text = full_text
+                st.session_state.report_data = report_data
 
-                        if csv_data is not None and not csv_data.empty:
-                            csv_buffer = io.StringIO()
-                            csv_data.to_csv(csv_buffer, index=False)
-                            st.download_button("Download CSV", csv_buffer.getvalue(), "keywords.csv", "text/csv")
+                buf = io.BytesIO()
+                pdf = FPDF()
+                pdf.set_auto_page_break(auto=True, margin=15)
+                for item in report_data:
+                    pdf.add_page()
+                    pdf.set_font("Helvetica", 'B', 16)
+                    safe_title = item['title'].encode('latin-1', 'ignore').decode('latin-1')
+                    pdf.multi_cell(0, 10, safe_title, align='C')
+                    pdf.ln(5)
+                    pdf.set_font("Helvetica", '', 10)
+                    pdf.cell(0, 8, f"Source: {'YouTube' if 'url' in item else 'Document'}", ln=True)
+                    pdf.ln(10)
+                    pdf.set_font("Helvetica", '', 11)
+                    safe_transcript = item['transcript'].encode('latin-1', 'ignore').decode('latin-1')
+                    pdf.multi_cell(0, 6, safe_transcript)
+                pdf.output(buf)
+                buf.seek(0)
+                st.download_button("Download PDF", buf, "Content.pdf", "application/pdf")
 
-                        if net is not None:
-                            st.markdown("Graph")
-                            net.save_graph("graph.html")
-                            with open("graph.html", "r", encoding="utf-8") as f:
-                                st.components.v1.html(f.read(), height=650, scrolling=True)
-                        else:
-                            st.info("No graph")
+                with st.spinner("AlgoDev"):
+                    ranked_terms, G, all_terms, net, extra_msg = simulate_dfil(full_text)
+                    context_mode = st.selectbox("Context", ["Evergreen", "QDF", "Mobile"])
+                    gated_weights = simulate_gating(ranked_terms, G, context_mode, st.session_state.get('serper_key'), url_input or (uploaded_file.name if uploaded_file else ""))
+                    report, csv_data = generate_seo_report(ranked_terms, G, gated_weights, extra_msg)
 
-                    st.success("Done — go to Query")
+                    st.text_area("Report", report, height=400)
+
+                    if csv_data is not None and not csv_data.empty:
+                        csv_buffer = io.StringIO()
+                        csv_data.to_csv(csv_buffer, index=False)
+                        st.download_button("Download CSV", csv_buffer.getvalue(), "keywords.csv", "text/csv")
+
+                    if net is not None:
+                        st.markdown("Graph")
+                        net.save_graph("graph.html")
+                        with open("graph.html", "r", encoding="utf-8") as f:
+                            st.components.v1.html(f.read(), height=650, scrolling=True)
+                    else:
+                        st.info("No graph")
+
+                st.success("Done — go to Query")
 
 with tab2:
     if 'full_text' not in st.session_state:
